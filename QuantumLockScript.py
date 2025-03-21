@@ -36,13 +36,18 @@ from rich.live import Live
 from rich.tree import Tree
 from rich.syntax import Syntax
 from rich.markdown import Markdown
+from rich.spinner import Spinner
+from rich.box import DOUBLE
+from rich.status import Status
+from rich.columns import Columns
+from rich.align import Align
 import paramiko
 import socket
 import statistics
 from cryptography.fernet import Fernet
 import json
 import requests
-from scapy.all import IP, TCP, UDP, ICMP, ARP, Ether, send, sniff, DNS, DNSRR, Raw
+from scapy.all import IP, TCP, UDP, ICMP, ARP, Ether, send, sniff, DNS, DNSRR, Raw, sr1, srp
 import matplotlib.pyplot as plt
 import dns.resolver
 import schedule
@@ -65,6 +70,32 @@ import magic
 import pefile
 import volatility3
 import r2pipe
+import whois
+import ssl
+import OpenSSL
+import pytesseract
+from PIL import Image
+import cv2
+import numpy as np
+from faker import Faker
+import virustotal_python
+import sqlite3
+from threading import Lock
+import dns.reversename
+import dns.query
+import dns.zone
+import dns.tsigkeyring
+from dns.update import Update
+import pygeoip
+import maxminddb
+from rich.progress import TaskID
+import base64
+import shutil
+import aiofiles
+import concurrent.futures
+
+# Initialize Faker for synthetic data generation
+fake = Faker()
 
 # Initialize console for rich output
 console = Console()
@@ -80,6 +111,30 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger()
+
+# Database setup for persistent storage
+DB_FILE = os.path.join(OUTPUT_DIR, "cybersec_db.sqlite")
+db_lock = Lock()
+
+def init_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            task TEXT,
+            target TEXT,
+            result TEXT
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS threats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            ip TEXT,
+            type TEXT,
+            details TEXT
+        )''')
+        conn.commit()
+    logger.info("Database initialized.")
 
 # Encryption for credential storage
 KEY_FILE = os.path.join(OUTPUT_DIR, "secret.key")
@@ -868,7 +923,6 @@ def binary_analysis():
     finally:
         r2.quit()
 
-# NEW Feature: Automated Report Generation
 def generate_pdf_report():
     report_file = os.path.join(OUTPUT_DIR, "cybersec_report.pdf")
     doc = SimpleDocTemplate(report_file, pagesize=letter)
@@ -886,42 +940,377 @@ def generate_pdf_report():
     console.print(f"[green]PDF report generated: {report_file}[/green]")
     logger.info(f"PDF report generated: {report_file}")
 
-# Function to display the main menu with dashboard
+# Task 16: Automated OSINT Collection
+async def osint_collection():
+    logger.info("Starting Automated OSINT Collection")
+    console.print("[cyan]Enter target (domain, IP, or username):[/cyan]")
+    target = Prompt.ask("Target")
+    
+    async def fetch_web_content():
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(f"http://{target}") as resp:
+                    html = await resp.text()
+                    soup = BeautifulSoup(html, "html.parser")
+                    return {"title": soup.title.string if soup.title else "N/A", "links": [a["href"] for a in soup.find_all("a", href=True)]}
+            except Exception as e:
+                return {"error": str(e)}
+
+    async def fetch_whois():
+        try:
+            w = whois.whois(target)
+            return {"registrar": w.registrar, "creation_date": str(w.creation_date)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def fetch_shodan(api_key):
+        api = shodan.Shodan(api_key)
+        try:
+            result = api.host(target)
+            return {"os": result.get("os", "N/A"), "ports": result.get("ports", [])}
+        except Exception as e:
+            return {"error": str(e)}
+
+    with Progress(SpinnerColumn(), TextColumn("[yellow]Collecting OSINT...[/yellow]"), transient=True) as progress:
+        task = progress.add_task("OSINT", total=None)
+        shodan_key = Prompt.ask("Shodan API Key (optional, press Enter to skip)", default="")
+        results = await asyncio.gather(
+            fetch_web_content(),
+            fetch_whois(),
+            fetch_shodan(shodan_key) if shodan_key else asyncio.sleep(0, result={"skipped": True})
+        )
+
+    osint_data = {"web": results[0], "whois": results[1], "shodan": results[2]}
+    table = Table(title=f"OSINT Results for {target}", box=DOUBLE)
+    table.add_column("Source", style="cyan")
+    table.add_column("Details", style="yellow")
+    for source, data in osint_data.items():
+        table.add_row(source, "\n".join(f"{k}: {v}" for k, v in data.items()))
+    console.print(table)
+
+    osint_file = os.path.join(OUTPUT_DIR, f"osint_{target}.json")
+    with open(osint_file, "w") as f:
+        json.dump(osint_data, f, indent=4)
+    logger.info(f"OSINT collection completed. Results in {osint_file}")
+
+# Task 17: SSL/TLS Security Auditor
+def ssl_auditor():
+    logger.info("Starting SSL/TLS Security Auditor")
+    console.print("[cyan]Enter domain to audit (e.g., example.com):[/cyan]")
+    domain = Prompt.ask("Domain")
+    
+    try:
+        cert = ssl.get_server_certificate((domain, 443))
+        x509 = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, cert)
+        issuer = x509.get_issuer().CN
+        expiry = datetime.strptime(x509.get_notAfter().decode(), "%Y%m%d%H%M%SZ")
+        cipher_suite = ssl.create_connection((domain, 443)).get_ciphers()
+
+        issues = []
+        if expiry < datetime.now():
+            issues.append("Certificate expired!")
+        if "RC4" in str(cipher_suite):
+            issues.append("Weak RC4 cipher detected!")
+        if "TLSv1.0" in str(cipher_suite):
+            issues.append("Outdated TLSv1.0 detected!")
+
+        panel = Panel(
+            f"[green]Issuer:[/green] {issuer}\n"
+            f"[green]Expiry:[/green] {expiry}\n"
+            f"[green]Ciphers:[/green] {len(cipher_suite)} detected\n"
+            f"[{'red' if issues else 'green'}]Issues:[/] {', '.join(issues) if issues else 'None'}",
+            title=f"SSL/TLS Audit for {domain}",
+            border_style="blue", box=DOUBLE
+        )
+        console.print(panel)
+
+        ssl_file = os.path.join(OUTPUT_DIR, f"ssl_audit_{domain}.txt")
+        with open(ssl_file, "w") as f:
+            f.write(f"Issuer: {issuer}\nExpiry: {expiry}\nCiphers: {cipher_suite}\nIssues: {issues}")
+        logger.info(f"SSL audit completed. Results in {ssl_file}")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+# Task 18: Automated Phishing Detection
+def phishing_detection():
+    logger.info("Starting Automated Phishing Detection")
+    console.print("[cyan]Enter email file path or URL to analyze:[/cyan]")
+    target = Prompt.ask("Target")
+    
+    if os.path.isfile(target):
+        with open(target, "r") as f:
+            content = f.read()
+    else:
+        content = requests.get(target).text
+
+    suspicious_indicators = {
+        "spoofed_domain": re.search(r"(login|account|verify).*(google|paypal|bank)", content, re.IGNORECASE),
+        "urgency": re.search(r"(urgent|immediate|now)", content, re.IGNORECASE),
+        "malicious_link": re.search(r"https?://[^\s]+", content)
+    }
+    
+    table = Table(title="Phishing Indicators", box=DOUBLE)
+    table.add_column("Indicator", style="cyan")
+    table.add_column("Detected", style="yellow")
+    for indicator, match in suspicious_indicators.items():
+        table.add_row(indicator, "[red]Yes[/red]" if match else "[green]No[/green]")
+    console.print(table)
+
+    risk_score = sum(1 for v in suspicious_indicators.values() if v) * 25
+    console.print(Panel(f"[yellow]Phishing Risk Score: {risk_score}/100[/yellow]", border_style="red" if risk_score > 50 else "green"))
+
+    phishing_file = os.path.join(OUTPUT_DIR, "phishing_report.txt")
+    with open(phishing_file, "w") as f:
+        f.write(f"Target: {target}\nRisk Score: {risk_score}\nIndicators: {suspicious_indicators}")
+    logger.info(f"Phishing detection completed. Report in {phishing_file}")
+
+# Task 19: Dark Web Scanner
+async def dark_web_scanner():
+    logger.info("Starting Dark Web Scanner")
+    console.print("[cyan]Enter keyword to search (e.g., company name):[/cyan]")
+    keyword = Prompt.ask("Keyword")
+    
+    # Simulated dark web search (replace with real Tor integration if desired)
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://api.onionsearch.com/search?q={keyword}") as resp:
+            data = await resp.json()
+    
+    findings = data.get("results", [])
+    table = Table(title=f"Dark Web Findings for '{keyword}'", box=DOUBLE)
+    table.add_column("Title", style="cyan")
+    table.add_column("URL", style="yellow")
+    for finding in findings[:5]:  # Top 5 results
+        table.add_row(finding.get("title", "N/A"), finding.get("url", "N/A"))
+    console.print(table)
+
+    dark_file = os.path.join(OUTPUT_DIR, f"darkweb_{keyword}.json")
+    with open(dark_file, "w") as f:
+        json.dump(findings, f, indent=4)
+    logger.info(f"Dark web scan completed. Results in {dark_file}")
+
+# Task 20: Automated Exploit Framework
+def exploit_framework():
+    logger.info("Starting Automated Exploit Framework")
+    console.print("[cyan]Enter target IP:[/cyan]")
+    target_ip = Prompt.ask("Target IP")
+    
+    nm = nmap.PortScanner()
+    nm.scan(target_ip, "22-443")
+    exploits = []
+    
+    for port in nm[target_ip]["tcp"]:
+        if port == 22 and nm[target_ip]["tcp"][port]["state"] == "open":
+            exploits.append("SSH Brute Force (Hydra simulation)")
+        elif port == 80 and "http" in nm[target_ip]["tcp"][port]["name"]:
+            exploits.append("HTTP Exploit (e.g., CVE-2021-3129 simulation)")
+
+    with Progress(SpinnerColumn(), TextColumn("[yellow]Simulating exploits...[/yellow]")) as progress:
+        task = progress.add_task("Exploits", total=len(exploits))
+        for exploit in exploits:
+            time.sleep(2)  # Simulate exploit execution
+            progress.update(task, advance=1)
+
+    table = Table(title=f"Exploit Results for {target_ip}", box=DOUBLE)
+    table.add_column("Exploit", style="cyan")
+    table.add_column("Status", style="yellow")
+    for exploit in exploits:
+        table.add_row(exploit, "[green]Simulated[/green]")
+    console.print(table)
+
+    exploit_file = os.path.join(OUTPUT_DIR, f"exploit_{target_ip}.txt")
+    with open(exploit_file, "w") as f:
+        f.write(f"Target: {target_ip}\nExploits: {exploits}")
+    logger.info(f"Exploit simulation completed. Results in {exploit_file}")
+
+# Task 21: Synthetic Attack Generator
+def synthetic_attack_generator():
+    logger.info("Starting Synthetic Attack Generator")
+    console.print("[cyan]Enter target IP:[/cyan]")
+    target_ip = Prompt.ask("Target IP")
+    
+    attack_types = [
+        ("SYN Flood", IP(dst=target_ip) / TCP(dport=80, flags="S")),
+        ("ICMP Ping Flood", IP(dst=target_ip) / ICMP()),
+        ("UDP Flood", IP(dst=target_ip) / UDP(dport=53))
+    ]
+    
+    with Live(Panel("[yellow]Generating synthetic attacks...[/yellow]", box=DOUBLE), refresh_per_second=4) as live:
+        for attack_name, packet in attack_types:
+            live.update(Panel(f"[cyan]Running: {attack_name}[/cyan]", box=DOUBLE))
+            send(packet, count=50, verbose=False)
+            time.sleep(1)
+    
+    console.print(f"[green]Synthetic attacks completed on {target_ip}[/green]")
+    logger.info(f"Synthetic attacks generated on {target_ip}")
+
+# Task 22: Advanced Packet Forensics
+def packet_forensics():
+    logger.info("Starting Advanced Packet Forensics")
+    console.print("[cyan]Enter PCAP file path:[/cyan]")
+    pcap_file = Prompt.ask("PCAP File")
+    
+    if not os.path.exists(pcap_file):
+        console.print("[red]File not found.[/red]")
+        return
+    
+    cap = pyshark.FileCapture(pcap_file)
+    packets = list(cap)
+    
+    proto_count = Counter(pkt.protocol for pkt in packets if hasattr(pkt, "protocol"))
+    suspicious = [pkt for pkt in packets if hasattr(pkt, "tcp") and pkt.tcp.flags_syn == "1" and pkt.tcp.flags_ack == "0"]
+    
+    table = Table(title="Packet Forensics Summary", box=DOUBLE)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="yellow")
+    table.add_row("Total Packets", str(len(packets)))
+    table.add_row("Protocols", ", ".join(f"{k}: {v}" for k, v in proto_count.items()))
+    table.add_row("Suspicious SYN", str(len(suspicious)))
+    console.print(table)
+
+    forensics_file = os.path.join(OUTPUT_DIR, "packet_forensics.txt")
+    with open(forensics_file, "w") as f:
+        f.write(f"Total Packets: {len(packets)}\nProtocols: {dict(proto_count)}\nSuspicious: {len(suspicious)}")
+    logger.info(f"Packet forensics completed. Results in {forensics_file}")
+
+# Task 23: GeoIP Threat Mapping
+def geoip_threat_mapping():
+    logger.info("Starting GeoIP Threat Mapping")
+    console.print("[cyan]Enter IP list file or single IP:[/cyan]")
+    target = Prompt.ask("Target")
+    
+    gi = pygeoip.GeoIP("GeoIP.dat")  # Requires GeoIP database
+    threats = []
+    
+    if os.path.isfile(target):
+        with open(target) as f:
+            ips = f.read().splitlines()
+    else:
+        ips = [target]
+    
+    for ip in ips:
+        try:
+            loc = gi.record_by_addr(ip)
+            threats.append({"ip": ip, "country": loc["country_name"], "city": loc.get("city", "N/A")})
+        except Exception as e:
+            logger.error(f"GeoIP lookup failed for {ip}: {e}")
+
+    table = Table(title="GeoIP Threat Map", box=DOUBLE)
+    table.add_column("IP", style="cyan")
+    table.add_column("Country", style="yellow")
+    table.add_column("City", style="green")
+    for threat in threats:
+        table.add_row(threat["ip"], threat["country"], threat["city"])
+    console.print(table)
+
+    geoip_file = os.path.join(OUTPUT_DIR, "geoip_map.json")
+    with open(geoip_file, "w") as f:
+        json.dump(threats, f, indent=4)
+    logger.info(f"GeoIP mapping completed. Results in {geoip_file}")
+
+# Task 24: SOC Automation Dashboard
+def soc_automation():
+    logger.info("Starting SOC Automation Dashboard")
+    
+    def update_dashboard(live):
+        while True:
+            layout = create_dashboard()
+            threats = []
+            with sqlite3.connect(DB_FILE) as conn:
+                c = conn.cursor()
+                c.execute("SELECT ip, type, details FROM threats ORDER BY timestamp DESC LIMIT 5")
+                threats = c.fetchall()
+            
+            threat_table = Table(title="Recent Threats", box=DOUBLE)
+            threat_table.add_column("IP", style="cyan")
+            threat_table.add_column("Type", style="yellow")
+            threat_table.add_column("Details", style="green")
+            for ip, ttype, details in threats:
+                threat_table.add_row(ip, ttype, details)
+            
+            layout["actions"].update(threat_table)
+            live.update(layout)
+            time.sleep(5)
+    
+    with Live(create_dashboard(), refresh_per_second=4) as live:
+        threading.Thread(target=update_dashboard, args=(live,), daemon=True).start()
+        try:
+            Prompt.ask("[yellow]Press Enter to exit dashboard...[/yellow]")
+        except KeyboardInterrupt:
+            pass
+    console.print("[green]SOC Dashboard stopped.[/green]")
+
+# Task 25: Automated Honeypot Deployer
+def honeypot_deployer():
+    logger.info("Starting Automated Honeypot Deployer")
+    console.print("[cyan]Enter port to deploy honeypot on:[/cyan]")
+    port = int(Prompt.ask("Port", default="8080"))
+    
+    def honeypot_server():
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("0.0.0.0", port))
+        server.listen(5)
+        console.print(f"[green]Honeypot running on port {port}[/green]")
+        
+        while True:
+            client, addr = server.accept()
+            logger.warning(f"Honeypot hit from {addr}")
+            with sqlite3.connect(DB_FILE) as conn:
+                c = conn.cursor()
+                c.execute("INSERT INTO threats (timestamp, ip, type, details) VALUES (?, ?, ?, ?)",
+                         (datetime.now().isoformat(), addr[0], "Honeypot", "Connection attempt"))
+                conn.commit()
+            client.send(b"Welcome to the honeypot!\n")
+            client.close()
+    
+    threading.Thread(target=honeypot_server, daemon=True).start()
+    console.print("[yellow]Honeypot deployed. Press Enter to stop...[/yellow]")
+    input()
+    logger.info("Honeypot stopped.")
+
+# Updated display_menu with new tasks
 def display_menu():
-    layout = Layout()
-    layout.split_column(
-        Layout(name="header", size=5),
-        Layout(name="menu", ratio=1),
-        Layout(name="footer", size=3)
-    )
-    layout["header"].update(Panel("[cyan]CyberSec Toolkit 2025 Dashboard[/cyan]", border_style="green"))
-    menu_table = Table(title="Select a Task", show_header=False, expand=True)
-    menu_table.add_row("[green][1][/green] System Metrics Monitoring - Real-time with anomaly detection")
-    menu_table.add_row("[green][2][/green] Security Testing - Simulated attacks with packet crafting")
-    menu_table.add_row("[green][3][/green] Remote Reconnaissance - SSH-based with encrypted creds")
-    menu_table.add_row("[green][4][/green] Network Scanning - Vulnerability scoring and visualization")
-    menu_table.add_row("[green][5][/green] Auth Log Analyzer - With threat intelligence lookup")
-    menu_table.add_row("[green][6][/green] DNS Enumeration - With spoofing detection")
-    menu_table.add_row("[green][7][/green] Firewall Rule Auditor - Analyze and suggest rules")
-    menu_table.add_row("[green][8][/green] Wi-Fi Security Scanner - Assess wireless networks")
-    menu_table.add_row("[green][9][/green] Intrusion Detection - Real-time packet monitoring")
-    menu_table.add_row("[green][10][/green] DDoS Mitigation - Simulate and mitigate")
-    menu_table.add_row("[green][11][/green] Advanced Network Protocol Analyzer")
-    menu_table.add_row("[green][12][/green] Malware Analysis Lab")
-    menu_table.add_row("[green][13][/green] Web Application Security Scanner")
-    menu_table.add_row("[green][14][/green] Memory Forensics Analyzer")
-    menu_table.add_row("[green][15][/green] Binary Analysis Tool")
-    menu_table.add_row("[green][0][/green] Exit - Quit the toolkit")
-    layout["menu"].update(menu_table)
-    layout["footer"].update(Panel(f"[yellow]Output Directory: {OUTPUT_DIR}[/yellow]", border_style="blue"))
+    layout = create_dashboard()
+    menu_table = Table(title="Select a Task", show_header=False, expand=True, box=DOUBLE)
+    menu_items = [
+        "[green][1][/green] System Metrics Monitoring - Real-time with anomaly detection",
+        "[green][2][/green] Security Testing - Simulated attacks with packet crafting",
+        "[green][3][/green] Remote Reconnaissance - SSH-based with encrypted creds",
+        "[green][4][/green] Network Scanning - Vulnerability scoring and visualization",
+        "[green][5][/green] Auth Log Analyzer - With threat intelligence lookup",
+        "[green][6][/green] DNS Enumeration - With spoofing detection",
+        "[green][7][/green] Firewall Rule Auditor - Analyze and suggest rules",
+        "[green][8][/green] Wi-Fi Security Scanner - Assess wireless networks",
+        "[green][9][/green] Intrusion Detection - Real-time packet monitoring",
+        "[green][10][/green] DDoS Mitigation - Simulate and mitigate",
+        "[green][11][/green] Advanced Network Protocol Analyzer",
+        "[green][12][/green] Malware Analysis Lab",
+        "[green][13][/green] Web Application Security Scanner",
+        "[green][14][/green] Memory Forensics Analyzer",
+        "[green][15][/green] Binary Analysis Tool",
+        "[green][16][/green] Automated OSINT Collection - Web, WHOIS, Shodan",
+        "[green][17][/green] SSL/TLS Security Auditor - Certs and ciphers",
+        "[green][18][/green] Automated Phishing Detection - Email/URL analysis",
+        "[green][19][/green] Dark Web Scanner - Onion network search",
+        "[green][20][/green] Automated Exploit Framework - Vulnerability exploitation",
+        "[green][21][/green] Synthetic Attack Generator - Multi-type attack simulation",
+        "[green][22][/green] Advanced Packet Forensics - PCAP deep dive",
+        "[green][23][/green] GeoIP Threat Mapping - Location-based threat intel",
+        "[green][24][/green] SOC Automation Dashboard - Real-time threat monitoring",
+        "[green][25][/green] Automated Honeypot Deployer - Trap attackers",
+        "[green][0][/green] Exit - Quit the toolkit"
+    ]
+    for item in menu_items:
+        menu_table.add_row(item)
+    layout["actions"].update(menu_table)
     
     console.print(layout)
-    return Prompt.ask("Enter your choice (0-15)", choices=[str(i) for i in range(16)])
+    return Prompt.ask("Enter your choice (0-25)", choices=[str(i) for i in range(26)])
 
-# Main execution loop
+# Updated main function
 def main():
     display_banner()
     check_dependencies()
+    init_db()  # Initialize database
     logger.info("CyberSec Toolkit initialized")
     while True:
         choice = display_menu()
@@ -956,6 +1345,26 @@ def main():
                 memory_forensics()
             elif choice == "15":
                 binary_analysis()
+            elif choice == "16":
+                asyncio.run(osint_collection())
+            elif choice == "17":
+                ssl_auditor()
+            elif choice == "18":
+                phishing_detection()
+            elif choice == "19":
+                asyncio.run(dark_web_scanner())
+            elif choice == "20":
+                exploit_framework()
+            elif choice == "21":
+                synthetic_attack_generator()
+            elif choice == "22":
+                packet_forensics()
+            elif choice == "23":
+                geoip_threat_mapping()
+            elif choice == "24":
+                soc_automation()
+            elif choice == "25":
+                honeypot_deployer()
             elif choice == "0":
                 console.print("[green]Thank you for using CyberSec Toolkit 2025![/green]")
                 console.print(f"[yellow]Logs and results saved to: {OUTPUT_DIR}[/yellow]")
