@@ -7,11 +7,7 @@
 
 ## Project Overview
 
-**Author**: [Your Name Here]  
-**Student Code**: [Your Student Code Here]  
-**Class Code**: [Your Class Code Here]  
-**Lecturer**: [Your Lecturer Name Here]  
-**Submission Date**: March 21, 2025  
+
 
 The **CyberSec Toolkit 2025 - Enhanced Edition** is a sophisticated Python-based cybersecurity suite designed for the ThinkCyber Project Competition 2025. It integrates five powerful tools with advanced features, showcasing technical expertise, creativity, and practical application in a user-friendly package. Built for educational and authorized use, this toolkit empowers users to monitor systems, test security, gather intelligence, scan networks, and analyze logs with cutting-edge enhancements.
 
