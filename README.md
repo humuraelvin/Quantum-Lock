@@ -65,7 +65,7 @@ sudo apt-get install -y nmap masscan hydra hping3 whois
 
 3.
 
-pip install rich paramiko cryptography scapy matplotlib requests
+pip install rich paramiko cryptography scapy matplotlib requests selenium beautifulsoup4 pyshark yara-python python-magic pefile volatility3 r2pipe
 
 4. 
 
