@@ -93,6 +93,7 @@ import base64
 import shutil
 import aiofiles
 import concurrent.futures
+from datetime import datetime, timedelta
 
 # Initialize Faker for synthetic data generation
 fake = Faker()
@@ -1267,7 +1268,188 @@ def honeypot_deployer():
     input()
     logger.info("Honeypot stopped.")
 
-# Updated display_menu with new tasks
+# Add this new function after Task 25 (Automated Honeypot Deployer)
+def network_devices():
+    logger.info("Starting Network Device Scanner")
+    console.print("[cyan]Enter network interface (e.g., eth0, wlan0) or press Enter for default:[/cyan]")
+    interface = Prompt.ask("Interface", default=netifaces.gateways()['default'][netifaces.AF_INET][1])
+    
+    # Get local IP and subnet
+    try:
+        addrs = netifaces.ifaddresses(interface)
+        ip_info = addrs[netifaces.AF_INET][0]
+        local_ip = ip_info['addr']
+        netmask = ip_info['netmask']
+        
+        # Calculate subnet
+        from ipaddress import ip_network
+        subnet = str(ip_network(f"{local_ip}/{netmask}", strict=False))
+        console.print(f"[yellow]Scanning subnet: {subnet} on interface {interface}...[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error getting network info: {e}[/red]")
+        return
+
+    devices = {}
+    
+    def arp_scan():
+        # Use ARP to discover devices
+        arp_request = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=subnet)
+        answered, _ = srp(arp_request, timeout=2, verbose=False, iface=interface)
+        
+        for sent, received in answered:
+            ip = received.psrc
+            mac = received.hwsrc
+            try:
+                hostname = socket.gethostbyaddr(ip)[0]
+            except (socket.herror, socket.gaierror):
+                hostname = "Unknown"
+            devices[ip] = {"mac": mac, "hostname": hostname}
+    
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
+        task = progress.add_task("[yellow]Discovering devices...", total=None)
+        arp_thread = threading.Thread(target=arp_scan)
+        arp_thread.start()
+        arp_thread.join()
+
+    if not devices:
+        console.print("[red]No devices found on the network.[/red]")
+        return
+
+    # Display results in a table
+    table = Table(title=f"Devices on {interface} ({subnet})", box=DOUBLE)
+    table.add_column("IP Address", style="cyan")
+    table.add_column("MAC Address", style="yellow")
+    table.add_column("Hostname", style="green")
+    
+    for ip, info in sorted(devices.items()):
+        table.add_row(ip, info["mac"], info["hostname"])
+    
+    console.print(table)
+    
+    # Save results
+    devices_file = os.path.join(OUTPUT_DIR, f"network_devices_{interface}.json")
+    with open(devices_file, "w") as f:
+        json.dump(devices, f, indent=4)
+    
+    console.print(f"[green]Scan completed. Results saved to: {devices_file}[/green]")
+    logger.info(f"Network device scan completed. Found {len(devices)} devices.")
+
+def zero_day_predictor():
+    logger.info("Starting Zero-Day Vulnerability Predictor")
+    console.print("[cyan]Enter target IP or hostname to analyze:[/cyan]")
+    target = Prompt.ask("Target")
+    
+    # Step 1: Scan target with nmap
+    console.print("[yellow]Scanning target for services...[/yellow]")
+    nm = nmap.PortScanner()
+    try:
+        nm.scan(target, "1-65535", arguments="-sV -T4")
+    except Exception as e:
+        console.print(f"[red]Nmap scan failed: {e}[/red]")
+        return
+    
+    if target not in nm.all_hosts():
+        console.print("[red]No response from target.[/red]")
+        return
+    
+    # Step 2: Collect service data
+    services = []
+    for port in nm[target].all_tcp():
+        if nm[target]['tcp'][port]['state'] == 'open':
+            service = {
+                "port": port,
+                "name": nm[target]['tcp'][port].get('name', 'unknown'),
+                "version": nm[target]['tcp'][port].get('version', ''),
+                "product": nm[target]['tcp'][port].get('product', '')
+            }
+            services.append(service)
+    
+    if not services:
+        console.print("[red]No open services detected.[/red]")
+        return
+    
+    # Step 3: Query NVD for historical CVEs (simplified)
+    console.print("[yellow]Checking historical vulnerabilities...[/yellow]")
+    predictions = []
+    nvd_base_url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    for service in services:
+        product = service['product'] or service['name']
+        if not product or product == 'unknown':
+            continue
+        
+        # Heuristic scoring factors
+        score = 0
+        details = {"service": f"{product} on port {service['port']}"}
+        
+        # Factor 1: Historical CVE count (simplified lookup)
+        try:
+            response = requests.get(f"{nvd_base_url}?keywordSearch={product}&resultsPerPage=1")
+            if response.status_code == 200:
+                data = response.json()
+                total_cves = data.get('totalResults', 0)
+                score += min(total_cves // 10, 5)  # Cap at 5 points
+                details["cve_count"] = total_cves
+            else:
+                details["cve_count"] = "N/A"
+        except Exception as e:
+            logger.error(f"NVD lookup failed for {product}: {e}")
+            details["cve_count"] = "Error"
+        
+        # Factor 2: Service age (heuristic based on version or name)
+        if service['version']:
+            try:
+                version_year = int(service['version'].split('.')[0])
+                if version_year < (datetime.now().year - 5):
+                    score += 3
+                    details["age_risk"] = "Old version detected"
+            except ValueError:
+                details["age_risk"] = "Unknown"
+        else:
+            score += 2  # No version info might indicate obscurity
+            details["age_risk"] = "Version not specified"
+        
+        # Factor 3: Complexity (simplified)
+        complex_services = ['http', 'apache', 'nginx', 'mysql', 'ssh']
+        if service['name'].lower() in complex_services:
+            score += 2
+            details["complexity"] = "High"
+        else:
+            details["complexity"] = "Low"
+        
+        # Factor 4: Unusual port usage
+        common_ports = {22: 'ssh', 80: 'http', 443: 'https', 3306: 'mysql'}
+        if service['port'] not in common_ports or common_ports.get(service['port']) != service['name']:
+            score += 2
+            details["port_usage"] = "Unusual"
+        else:
+            details["port_usage"] = "Typical"
+        
+        # Cap score at 10
+        score = min(score, 10)
+        details["zero_day_score"] = score
+        predictions.append(details)
+    
+    # Step 4: Display results
+    table = Table(title=f"Zero-Day Vulnerability Predictions for {target}", box=DOUBLE)
+    table.add_column("Service", style="cyan")
+    table.add_column("Zero-Day Score (0-10)", style="yellow")
+    table.add_column("Risk Factors", style="green")
+    
+    for pred in predictions:
+        factors = f"CVE Count: {pred['cve_count']}, Age: {pred['age_risk']}, Complexity: {pred['complexity']}, Port: {pred['port_usage']}"
+        table.add_row(pred['service'], str(pred['zero_day_score']), factors)
+    
+    console.print(table)
+    
+    # Step 5: Save report
+    report_file = os.path.join(OUTPUT_DIR, f"zeroday_{target}.json")
+    with open(report_file, "w") as f:
+        json.dump(predictions, f, indent=4)
+    
+    console.print(f"[green]Zero-day prediction completed. Report saved to: {report_file}[/green]")
+    logger.info(f"Zero-day prediction completed for {target}. Found {len(predictions)} potential risks.")
+
+# Update display_menu() function - replace the existing one with this:
 def display_menu():
     layout = create_dashboard()
     menu_table = Table(title="Select a Task", show_header=False, expand=True, box=DOUBLE)
@@ -1297,6 +1479,8 @@ def display_menu():
         "[green][23][/green] GeoIP Threat Mapping - Location-based threat intel",
         "[green][24][/green] SOC Automation Dashboard - Real-time threat monitoring",
         "[green][25][/green] Automated Honeypot Deployer - Trap attackers",
+        "[green][26][/green] Network Device Scanner - List devices with IPs and MACs",
+        "[green][27][/green] Zero-Day Predictor - ML-inspired vulnerability prediction",
         "[green][0][/green] Exit - Quit the toolkit"
     ]
     for item in menu_items:
@@ -1304,13 +1488,13 @@ def display_menu():
     layout["actions"].update(menu_table)
     
     console.print(layout)
-    return Prompt.ask("Enter your choice (0-25)", choices=[str(i) for i in range(26)])
+    return Prompt.ask("Enter your choice (0-27)", choices=[str(i) for i in range(28)])
 
-# Updated main function
+# Update main() function - add this case before "elif choice == '0':"
 def main():
     display_banner()
     check_dependencies()
-    init_db()  # Initialize database
+    init_db()
     logger.info("CyberSec Toolkit initialized")
     while True:
         choice = display_menu()
@@ -1365,6 +1549,10 @@ def main():
                 soc_automation()
             elif choice == "25":
                 honeypot_deployer()
+            elif choice == "26":
+                network_devices()
+            elif choice == "27":
+                zero_day_predictor()
             elif choice == "0":
                 console.print("[green]Thank you for using CyberSec Toolkit 2025![/green]")
                 console.print(f"[yellow]Logs and results saved to: {OUTPUT_DIR}[/yellow]")
@@ -1380,6 +1568,22 @@ def main():
         else:
             console.print("[green]Exiting...[/green]")
             break
+
+# Add missing create_dashboard() function that was referenced
+def create_dashboard():
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=3),
+        Layout(name="main")
+    )
+    layout["header"].update(Panel("[cyan]CyberSec Toolkit 2025[/cyan]", border_style="green"))
+    layout["main"].split_row(
+        Layout(name="actions", ratio=1)
+    )
+    return layout
+
+# Add missing import at the top with other imports
+from ipaddress import ip_network
 
 if __name__ == "__main__":
     main()
