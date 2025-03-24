@@ -243,7 +243,7 @@ dnspython>=2.1.0      # DNS operations
    ```
 
 2. **Navigate the Menu**
-   - Use number keys (0-25) to select tools
+   - Use number keys (0-27) to select tools
    - Follow on-screen prompts
    - Use Ctrl+C to exit current tool
    - Select '0' to exit properly

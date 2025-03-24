@@ -42,3 +42,4 @@ aiofiles>=23.2.1      # For asynchronous file operations
 # - Some packages (e.g., sqlite3, socket, threading) are part of Python's standard library and don't need to be listed.
 # - System-level tools (nmap, masscan, hydra, etc.) should be installed separately via the OS package manager.
 # - Ensure you have the appropriate versions compatible with your Python version (recommended: Python 3.9+).
+# - For more info, Refer to README.md and the Project Documentation
