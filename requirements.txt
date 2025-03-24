@@ -1,0 +1,44 @@
+# requirements.txt for CyberSec Toolkit 2025
+
+# Core dependencies
+rich>=13.7.0          # For advanced terminal UI
+paramiko>=3.4.0       # For SSH connections
+cryptography>=42.0.0  # For encryption
+matplotlib>=3.8.0     # For visualizations
+requests>=2.31.0      # For HTTP requests
+dnspython>=2.6.1      # For DNS operations
+schedule>=1.2.1       # For scheduling tasks
+reportlab>=4.0.9      # For PDF report generation
+
+# Network and security tools
+scapy>=2.5.0          # For packet crafting and sniffing
+netifaces>=0.11.0     # For network interface information
+psutil>=5.9.8         # For system metrics
+shodan>=1.31.0        # For Shodan API integration
+python-nmap>=0.7.1    # For Nmap integration
+selenium>=4.18.1      # For web security scanning
+beautifulsoup4>=4.12.3 # For HTML parsing
+aiohttp>=3.9.3        # For asynchronous HTTP requests
+pyshark>=0.6          # For packet forensics
+yara-python>=4.5.0    # For malware analysis
+prettytable>=3.10.0   # For table formatting
+pefile>=2023.2.7      # For PE file analysis
+volatility3>=2.5.0    # For memory forensics
+radare2>=5.8.8        # For binary analysis (via r2pipe)
+python-whois>=0.9.4   # For WHOIS lookups
+pyOpenSSL>=24.0.0     # For SSL/TLS auditing
+pytesseract>=0.3.10   # For OCR (image analysis)
+Pillow>=10.2.0        # For image processing
+opencv-python>=4.9.0  # For computer vision
+faker>=24.3.0         # For synthetic data generation
+virustotal-python>=0.2.0 # For VirusTotal API
+pygeoip>=0.3.2        # For GeoIP lookups
+maxminddb>=2.5.2      # For GeoIP database access
+
+# Additional utilities
+aiofiles>=23.2.1      # For asynchronous file operations
+
+# Notes:
+# - Some packages (e.g., sqlite3, socket, threading) are part of Python's standard library and don't need to be listed.
+# - System-level tools (nmap, masscan, hydra, etc.) should be installed separately via the OS package manager.
+# - Ensure you have the appropriate versions compatible with your Python version (recommended: Python 3.9+).
