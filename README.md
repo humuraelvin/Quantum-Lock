@@ -194,7 +194,7 @@ dnspython>=2.1.0      # DNS operations
 2. **Install System Dependencies (Ubuntu/Debian)**
    ```bash
    sudo apt-get update
-   sudo apt-get install -y nmap masscan hydra hping3 whois aircrack-ng tcpdump wireshark radare2 volatility tesseract-ocr tor git build-essential python3-dev python3-pip
+   sudo apt-get install -y nmap masscan hydra hping3 whois aircrack-ng tcpdump wireshark radare2 volatility tesseract-ocr tor git build-essential python3-dev python3-pip radare2
    ```
 
    **For Windows:**

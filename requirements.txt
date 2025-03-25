@@ -24,7 +24,6 @@ yara-python>=4.5.0    # For malware analysis
 prettytable>=3.10.0   # For table formatting
 pefile>=2023.2.7      # For PE file analysis
 volatility3>=2.5.0    # For memory forensics
-radare2>=5.8.8        # For binary analysis (via r2pipe)
 python-whois>=0.9.4   # For WHOIS lookups
 pyOpenSSL>=24.0.0     # For SSL/TLS auditing
 pytesseract>=0.3.10   # For OCR (image analysis)
